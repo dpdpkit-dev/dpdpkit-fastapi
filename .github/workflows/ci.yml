@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
       - name: Install (non-editable, so mypy sees dpdpkit and dpdpkit.fastapi in one tree)
@@ -54,7 +54,7 @@ jobs:
          || '' }}
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v7
         with:
           python-version: ${{ matrix.python }}
       - name: Install
@@ -80,7 +80,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v7
       - run: |
           uv venv
           uv pip install "dpdpkit-policies @ git+https://github.com/dpdpkit-dev/dpdpkit-policies@main"             "dpdpkit-core @ git+https://github.com/dpdpkit-dev/dpdpkit-core@main" . pip-audit
