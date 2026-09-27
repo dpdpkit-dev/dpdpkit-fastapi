@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint-types:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - name: Install (non-editable, so mypy sees dpdpkit and dpdpkit.fastapi in one tree)
+        run: |
+          uv venv
+          uv pip install             "dpdpkit-policies @ git+https://github.com/dpdpkit-dev/dpdpkit-policies@main"             "dpdpkit-core @ git+https://github.com/dpdpkit-dev/dpdpkit-core@main"             ".[dev]"
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+      - run: ruff check . && ruff format --check .
+      - run: cd /tmp && mypy -p dpdpkit.fastapi --disallow-untyped-defs
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.13"]
+        db: [sqlite, postgres, mysql]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: dpdpkit
+          POSTGRES_DB: dpdpkit
+        ports: ["5432:5432"]
+        options: --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: dpdpkit
+          MYSQL_DATABASE: dpdpkit
+        ports: ["3306:3306"]
+        options: --health-cmd "mysqladmin ping -pdpdpkit" --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      DPDPKIT_TEST_DATABASE_URL: >-
+        ${{ matrix.db == 'postgres' && 'postgresql+psycopg://postgres:dpdpkit@localhost:5432/dpdpkit'
+         || matrix.db == 'mysql' && 'mysql+pymysql://root:dpdpkit@127.0.0.1:3306/dpdpkit'
+         || '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install
+        run: |
+          uv venv
+          uv pip install \
+            "dpdpkit-policies @ git+https://github.com/dpdpkit-dev/dpdpkit-policies@main" \
+            "dpdpkit-core @ git+https://github.com/dpdpkit-dev/dpdpkit-core@main" \
+            "dpdpkit-conformance[asgi] @ git+https://github.com/dpdpkit-dev/dpdpkit-spec@main" \
+            -e ".[dev,postgres,mysql]"
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+      - name: Unit, SQL tamper and migration tests
+        run: pytest -q
+      - name: Conformance suite against examples/fastapi_shop
+        working-directory: examples/fastapi_shop
+        env:
+          DPDPKIT_CONFORMANCE: "1"
+          DPDPKIT_ASGI_APP: app:app
+          DATABASE_URL: ${{ env.DPDPKIT_TEST_DATABASE_URL || 'sqlite://' }}
+        run: dpdpkit-conformance -q
+
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: |
+          uv venv
+          uv pip install "dpdpkit-policies @ git+https://github.com/dpdpkit-dev/dpdpkit-policies@main"             "dpdpkit-core @ git+https://github.com/dpdpkit-dev/dpdpkit-core@main" .
+          uvx pip-audit --python .venv/bin/python

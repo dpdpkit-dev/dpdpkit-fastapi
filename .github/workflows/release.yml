@@ -1,0 +1,101 @@
+# Release on tag vX.Y.Z (after dpdpkit-core X.Y.Z is on PyPI — release-train order).
+# Tags with a pre-release suffix (rc, a, b, dev) go to TestPyPI; others go to PyPI via trusted publishing.
+# Release-train order: policies (if changed) -> core -> adapters -> JS packages.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      prerelease: ${{ steps.v.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - id: v
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [[ "$version" =~ (a|b|rc|dev)[0-9]*$ ]]; then echo "prerelease=true"; else echo "prerelease=false"; fi >> "$GITHUB_OUTPUT"
+      - name: Test against published dependencies (core from PyPI, conformance from the spec tag)
+        run: |
+          uv venv && uv pip install -e ".[dev]"             "dpdpkit-conformance[asgi] @ git+https://github.com/dpdpkit-dev/dpdpkit-spec@main"             ${{ steps.v.outputs.prerelease == 'true' && '--prerelease=allow --index https://test.pypi.org/simple/ --index-strategy unsafe-best-match' || '' }}
+          .venv/bin/pytest -q
+          cd examples/fastapi_shop && DPDPKIT_CONFORMANCE=1 DPDPKIT_ASGI_APP=app:app ../../.venv/bin/dpdpkit-conformance -q
+      - name: Build
+        run: |
+          uv build --out-dir dist
+      - name: Tag must match package version
+        run: |
+          ls dist/dpdpkit_fastapi-${{ steps.v.outputs.version }}-*.whl
+      - name: SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: spdx-json
+          output-file: sbom.spdx.json
+          upload-artifact: false
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: |
+            dist/
+            sbom.spdx.json
+
+  publish-testpypi:
+    needs: build
+    if: needs.build.outputs.prerelease == 'true'
+    runs-on: ubuntu-latest
+    environment: testpypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: dist }
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+  publish-pypi:
+    needs: build
+    if: needs.build.outputs.prerelease == 'false'
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: dist }
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    needs: [build, publish-testpypi, publish-pypi]
+    if: always() && needs.build.result == 'success' && (needs.publish-pypi.result == 'success' || needs.publish-testpypi.result == 'success')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: dist }
+      - name: Release notes from CHANGELOG.md
+        run: |
+          awk -v v="${{ needs.build.outputs.version }}" '
+            $0 ~ "^## " { if (found) exit; if (index($0, v)) { found=1; next } }
+            found { print }' CHANGELOG.md > notes.md
+          test -s notes.md || echo "See CHANGELOG.md" > notes.md
+      - uses: softprops/action-gh-release@v2
+        with:
+          body_path: notes.md
+          prerelease: ${{ needs.build.outputs.prerelease == 'true' }}
+          files: |
+            dist/*
+            sbom.spdx.json

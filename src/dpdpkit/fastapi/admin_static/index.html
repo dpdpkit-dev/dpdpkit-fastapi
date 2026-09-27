@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>dpdpkit admin</title>
+<style>
+  body { font: 16px/1.5 system-ui, sans-serif; max-width: 42rem; margin: 3rem auto; padding: 0 1rem; color: #1f2328; }
+  code { background: #f3f4f6; padding: .1rem .3rem; border-radius: 4px; }
+</style>
+</head>
+<body>
+<h1>dpdpkit admin</h1>
+<p>The admin dashboard ships in v0.4. Until then, use the admin API under this mount's parent path:</p>
+<ul>
+  <li><code>GET ../requests</code> — request queue</li>
+  <li><code>GET ../retention/preview</code> — upcoming warnings and erasures</li>
+  <li><code>POST ../ledger/verify</code> — hash-chain check</li>
+  <li><code>GET ../audit/export</code> — evidence pack</li>
+</ul>
+<p>dpdpkit helps you implement DPDP obligations; it does not provide legal advice or guarantee compliance.</p>
+</body>
+</html>

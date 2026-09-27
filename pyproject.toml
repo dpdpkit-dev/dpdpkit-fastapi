@@ -1,0 +1,83 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "dpdpkit-fastapi"
+dynamic = ["version"]
+description = "FastAPI adapter for dpdpkit: DPDP consent, notices, rights requests and retention in your app."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+authors = [{ name = "dpdpkit maintainers" }]
+keywords = ["dpdp", "fastapi", "privacy", "consent", "india"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Framework :: FastAPI",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Topic :: Security",
+  "Typing :: Typed",
+]
+dependencies = [
+  "dpdpkit-core>=0.1.0.dev0,<0.2",
+  "fastapi>=0.110",
+  "sqlalchemy>=2.0.25",
+  "alembic>=1.13",
+]
+
+[project.optional-dependencies]
+scheduler = ["apscheduler>=3.10,<4"]
+postgres = ["psycopg[binary]>=3.1"]
+mysql = ["pymysql>=1.1"]
+dev = [
+  "pytest>=8",
+  "httpx>=0.27",
+  "uvicorn>=0.29",
+  "ruff>=0.6",
+  "mypy>=1.11",
+  "apscheduler>=3.10,<4",
+]
+
+[project.entry-points."dpdpkit.cli"]
+migrate = "dpdpkit.fastapi.cli:register"
+
+[project.urls]
+Homepage = "https://github.com/dpdpkit-dev/dpdpkit-fastapi"
+Changelog = "https://github.com/dpdpkit-dev/dpdpkit-fastapi/blob/main/CHANGELOG.md"
+
+[tool.hatch.version]
+path = "src/dpdpkit/fastapi/__init__.py"
+
+# Ships only dpdpkit/fastapi/; dpdpkit/__init__.py belongs to dpdpkit-core.
+[tool.hatch.build.targets.wheel]
+only-include = ["src/dpdpkit/fastapi"]
+sources = ["src"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/dpdpkit/fastapi", "tests", "examples", "README.md", "CHANGELOG.md", "LICENSE"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "RUF"]
+ignore = ["B008"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["dpdpkit"]
+known-third-party = ["fastapi"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/dpdpkit/fastapi/migrations/versions/*" = ["E501", "F401", "I001", "UP035"]
+
+[tool.mypy]
+python_version = "3.10"
+disallow_untyped_defs = true
+warn_unused_ignores = true
+plugins = ["pydantic.mypy"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
