@@ -27,9 +27,15 @@ jobs:
           if [[ "$version" =~ (a|b|rc|dev)[0-9]*$ ]]; then echo "prerelease=true"; else echo "prerelease=false"; fi >> "$GITHUB_OUTPUT"
           # .devN builds rehearse on TestPyPI; alphas, betas, release candidates and finals go to PyPI.
           if [[ "$version" == *dev* ]]; then echo "target=testpypi"; else echo "target=pypi"; fi >> "$GITHUB_OUTPUT"
-      - name: Test against published dependencies (core from PyPI, conformance from the spec tag)
+      - name: Test against published dependencies (core from PyPI, conformance from the spec repo)
         run: |
-          uv venv && uv pip install -e ".[dev]"             "dpdpkit-conformance[asgi] @ git+https://github.com/dpdpkit-dev/dpdpkit-spec@main"             ${{ steps.v.outputs.target == 'testpypi' && '--prerelease=allow --index https://test.pypi.org/simple/ --index-strategy unsafe-best-match' || '' }}
+          uv venv
+          # dpdpkit-core may have been released moments ago; give PyPI up to ~10 minutes.
+          for attempt in $(seq 1 20); do
+            uv pip install --refresh -e ".[dev]"               "dpdpkit-conformance[asgi] @ git+https://github.com/dpdpkit-dev/dpdpkit-spec@main"               ${{ steps.v.outputs.target == 'testpypi' && '--prerelease=allow --index https://test.pypi.org/simple/ --index-strategy unsafe-best-match' || '' }} && break
+            if [ "$attempt" = 20 ]; then echo "dependencies not available on the index"; exit 1; fi
+            echo "dependencies not on the index yet; retrying in 30s ($attempt/20)"; sleep 30
+          done
           .venv/bin/pytest -q
           cd examples/fastapi_shop && DPDPKIT_CONFORMANCE=1 DPDPKIT_ASGI_APP=app:app ../../.venv/bin/dpdpkit-conformance -q
       - name: Build
