@@ -9,7 +9,7 @@ from .app import ActivityMiddleware, DPDPKit, require_consent
 from .http import ConsentRequiredHTTP
 from .repository import SqlAlchemyRepository, make_engine
 
-__version__ = "0.1.0.dev0"
+__version__ = "0.1.0a1"
 
 __all__ = [
     "ActivityMiddleware",

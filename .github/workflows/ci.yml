@@ -83,5 +83,5 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - run: |
           uv venv
-          uv pip install "dpdpkit-policies @ git+https://github.com/dpdpkit-dev/dpdpkit-policies@main"             "dpdpkit-core @ git+https://github.com/dpdpkit-dev/dpdpkit-core@main" .
-          uvx pip-audit --python .venv/bin/python
+          uv pip install "dpdpkit-policies @ git+https://github.com/dpdpkit-dev/dpdpkit-policies@main"             "dpdpkit-core @ git+https://github.com/dpdpkit-dev/dpdpkit-core@main" . pip-audit
+          .venv/bin/pip-audit --skip-editable

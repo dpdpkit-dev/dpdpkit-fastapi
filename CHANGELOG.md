@@ -4,6 +4,8 @@ All code packages in the dpdpkit release train share one version number.
 
 ## Unreleased
 
+## 0.1.0a1 - 2026-09-27
+
 ### Added
 - `DPDPKit` with `install()`, `mount_admin()`, `require_consent()`, `start_scheduler()`, `migrate()`.
 - `SqlAlchemyRepository` implementing the dpdpkit-core `Repository` protocol.

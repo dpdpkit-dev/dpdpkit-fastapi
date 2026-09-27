@@ -1,5 +1,5 @@
 # Release on tag vX.Y.Z (after dpdpkit-core X.Y.Z is on PyPI — release-train order).
-# Tags with a pre-release suffix (rc, a, b, dev) go to TestPyPI; others go to PyPI via trusted publishing.
+# .devN tags go to TestPyPI; aN, bN, rcN and final tags go to PyPI via trusted publishing.
 # Release-train order: policies (if changed) -> core -> adapters -> JS packages.
 name: Release
 
@@ -16,6 +16,7 @@ jobs:
     outputs:
       version: ${{ steps.v.outputs.version }}
       prerelease: ${{ steps.v.outputs.prerelease }}
+      target: ${{ steps.v.outputs.target }}
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -24,9 +25,11 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           if [[ "$version" =~ (a|b|rc|dev)[0-9]*$ ]]; then echo "prerelease=true"; else echo "prerelease=false"; fi >> "$GITHUB_OUTPUT"
+          # .devN builds rehearse on TestPyPI; alphas, betas, release candidates and finals go to PyPI.
+          if [[ "$version" == *dev* ]]; then echo "target=testpypi"; else echo "target=pypi"; fi >> "$GITHUB_OUTPUT"
       - name: Test against published dependencies (core from PyPI, conformance from the spec tag)
         run: |
-          uv venv && uv pip install -e ".[dev]"             "dpdpkit-conformance[asgi] @ git+https://github.com/dpdpkit-dev/dpdpkit-spec@main"             ${{ steps.v.outputs.prerelease == 'true' && '--prerelease=allow --index https://test.pypi.org/simple/ --index-strategy unsafe-best-match' || '' }}
+          uv venv && uv pip install -e ".[dev]"             "dpdpkit-conformance[asgi] @ git+https://github.com/dpdpkit-dev/dpdpkit-spec@main"             ${{ steps.v.outputs.target == 'testpypi' && '--prerelease=allow --index https://test.pypi.org/simple/ --index-strategy unsafe-best-match' || '' }}
           .venv/bin/pytest -q
           cd examples/fastapi_shop && DPDPKIT_CONFORMANCE=1 DPDPKIT_ASGI_APP=app:app ../../.venv/bin/dpdpkit-conformance -q
       - name: Build
@@ -51,7 +54,7 @@ jobs:
 
   publish-testpypi:
     needs: build
-    if: needs.build.outputs.prerelease == 'true'
+    if: needs.build.outputs.target == 'testpypi'
     runs-on: ubuntu-latest
     environment: testpypi
     permissions:
@@ -65,7 +68,7 @@ jobs:
 
   publish-pypi:
     needs: build
-    if: needs.build.outputs.prerelease == 'false'
+    if: needs.build.outputs.target == 'pypi'
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
