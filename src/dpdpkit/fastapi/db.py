@@ -6,7 +6,7 @@ from __future__ import annotations
 import datetime as dt
 from typing import Any, ClassVar
 
-from sqlalchemy import JSON, BigInteger, Boolean, DateTime, Index, Integer, MetaData, String, UniqueConstraint
+from sqlalchemy import JSON, BigInteger, Boolean, DateTime, Index, Integer, MetaData, String, Text, UniqueConstraint
 from sqlalchemy.dialects import mysql, postgresql
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -150,3 +150,26 @@ class DeliveryRow(Base):
     tenant_id: Mapped[str] = mapped_column(String(64))
     created_at: Mapped[dt.datetime]
     doc: Mapped[dict[str, Any]]
+
+
+class WebhookDeliveryRow(Base):
+    """Outbox for outbound webhooks: one row per (endpoint, event). Secrets are never stored here."""
+
+    __tablename__ = "dpdp_webhook_deliveries"
+    __table_args__ = (
+        UniqueConstraint("endpoint_id", "event_id", name="uq_dpdp_webhook_deliveries_endpoint_event"),
+        Index("ix_dpdp_webhook_deliveries_due", "status", "next_attempt_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64))
+    endpoint_id: Mapped[str] = mapped_column(String(64))
+    event_id: Mapped[str] = mapped_column(String(64))
+    event_type: Mapped[str] = mapped_column(String(64))
+    body: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(16))
+    attempts: Mapped[int] = mapped_column(Integer)
+    next_attempt_at: Mapped[dt.datetime]
+    last_error: Mapped[str | None] = mapped_column(String(1000))
+    created_at: Mapped[dt.datetime]
+    delivered_at: Mapped[dt.datetime | None]

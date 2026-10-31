@@ -19,7 +19,7 @@ from starlette.responses import Response
 from dpdpkit import Kit, Registry
 from dpdpkit.config import kit_from_config, load_config, sync_notice
 from dpdpkit.errors import ConfigError, DpdpkitError
-from dpdpkit.events import LEDGER_TAMPERED
+from dpdpkit.events import LEDGER_TAMPERED, WebhookEndpoint
 from dpdpkit.kit import ContactResolver
 from dpdpkit.ledger import RootSink
 from dpdpkit.models import Role, RootHash
@@ -31,6 +31,7 @@ from dpdpkit.rights import IdentityVerifier
 from .http import ConsentRequiredHTTP, Forbidden, Unauthenticated, consent_required_handler, render_dpdpkit_error
 from .repository import SqlAlchemyRepository
 from .router import build_router
+from .webhooks import WebhookOutbox, endpoints_from_config
 
 log = logging.getLogger("dpdpkit.fastapi")
 
@@ -46,6 +47,9 @@ async def _maybe_await(value: Any) -> Any:
 
 class DPDPKit:
     """Wire dpdpkit into a FastAPI app.
+
+    ``webhooks`` are delivered through a database outbox (see :mod:`dpdpkit.fastapi.webhooks`); when
+    omitted they are read from the ``webhooks:`` list in the config, with secrets from ``secret_env``.
 
     ``principal_resolver(request)`` returns a stable, non-personal reference for the signed-in user
     (for example the user's primary key), or ``None``. ``admin_guard(request)`` returns a role
@@ -69,6 +73,7 @@ class DPDPKit:
         identity_verifier: IdentityVerifier | None = None,
         signing_key: bytes | str | None = None,
         tenant_id: str = "default",
+        webhooks: Iterable[WebhookEndpoint] | None = None,
         migrate_on_startup: bool = False,
         create_tables: bool = False,
         **kit_kwargs: Any,
@@ -105,6 +110,15 @@ class DPDPKit:
         self.admin_guard = admin_guard
         self.router = build_router(self)
         self._scheduler: Any = None
+
+        if webhooks is None and self.config is not None:
+            webhooks = endpoints_from_config(self.config.get("webhooks") or [])
+        self.webhooks: WebhookOutbox | None = None
+        if isinstance(repository, SqlAlchemyRepository):
+            self.webhooks = WebhookOutbox(repository, webhooks or [], clock=self.kit.now)
+            self.webhooks.attach(self.kit.events)
+        elif webhooks:
+            raise ConfigError("durable webhooks need the SQLAlchemy repository")
 
         global _default
         _default = self
@@ -208,12 +222,14 @@ class DPDPKit:
         verify_hour: int = 2,
         root_export_hour: int | None = 3,
         root_sinks: Iterable[RootSink] = (),
+        webhook_seconds: int = 30,
     ) -> Any:
         """Run retention every ``retention_minutes``, ledger verification daily at ``verify_hour`` and
         a root-hash export daily at ``root_export_hour`` UTC (``None`` disables it) (APScheduler).
 
         The export writes to each of ``root_sinks`` and publishes ``ledger.root_exported``; subscribe a
-        webhook to that event to hand a copy to a third party."""
+        webhook to that event to hand a copy to a third party. Due webhook deliveries are sent every
+        ``webhook_seconds`` when any endpoint is configured."""
         try:
             from apscheduler.schedulers.background import BackgroundScheduler  # type: ignore[import-untyped]
         except ImportError as exc:  # pragma: no cover
@@ -237,6 +253,15 @@ class DPDPKit:
                 "cron",
                 hour=root_export_hour,
                 id="dpdpkit-ledger-root-export",
+                max_instances=1,
+                coalesce=True,
+            )
+        if self.webhooks is not None and self.webhooks.endpoints:
+            scheduler.add_job(
+                self.webhooks.deliver_due,
+                "interval",
+                seconds=webhook_seconds,
+                id="dpdpkit-webhooks",
                 max_instances=1,
                 coalesce=True,
             )

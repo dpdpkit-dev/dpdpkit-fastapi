@@ -69,6 +69,7 @@ The step-by-step guide is the [FastAPI quickstart](https://dpdpkit-dev.github.io
 | `require_consent()` | Dependency returning 403 `consent_required` with the purpose |
 | Roles | `admin_guard` returns `viewer`, `handler` or `admin` |
 | Scheduler | APScheduler (`[scheduler]` extra); Celery and Arq entry points in v0.5 |
+| Webhooks | Database outbox: signed, retried with backoff, dead letters with `dpdpkit webhooks retry` |
 | Activity middleware | Records activity, restarting inactivity clocks and cancelling warned erasures |
 | Admin mount | Serves the admin dashboard bundle (placeholder page until v0.4) |
 
