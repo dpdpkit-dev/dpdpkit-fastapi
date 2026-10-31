@@ -63,7 +63,7 @@ The step-by-step guide is the [FastAPI quickstart](https://dpdpkit-dev.github.io
 
 | Component | Detail |
 | --- | --- |
-| `SqlAlchemyRepository` | SQLAlchemy 2.0; Postgres, MySQL, SQLite; microsecond timestamps so ledger hashes survive round trips |
+| `SqlAlchemyRepository` | SQLAlchemy 2.0; Postgres, MySQL, SQLite; accepts async URLs and `AsyncEngine`; microsecond timestamps so ledger hashes survive round trips |
 | Migrations | Alembic, forward-only, shipped in the package (`dpdpkit migrate`) |
 | Router | Full REST contract from [`dpdpkit-spec`](https://github.com/dpdpkit-dev/dpdpkit-spec) |
 | `require_consent()` | Dependency returning 403 `consent_required` with the purpose |

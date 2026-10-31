@@ -8,7 +8,7 @@ import time
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from importlib import resources
 from pathlib import Path
-from typing import Any
+from typing import Any, ParamSpec, TypeVar
 
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
@@ -34,6 +34,9 @@ from .router import build_router
 from .webhooks import WebhookOutbox, endpoints_from_config
 
 log = logging.getLogger("dpdpkit.fastapi")
+
+P = ParamSpec("P")
+T = TypeVar("T")
 
 PrincipalResolver = Callable[[Request], "str | Awaitable[str | None] | None"]
 AdminGuard = Callable[[Request], "Role | str | bool | Awaitable[Role | str | bool | None] | None"]
@@ -62,6 +65,7 @@ class DPDPKit:
         principal_resolver: PrincipalResolver,
         admin_guard: AdminGuard | None = None,
         db_url: str | None = None,
+        engine: Any = None,
         repository: Repository | None = None,
         config: str | Path | Mapping[str, Any] | None = None,
         policy: str | Policy | None = None,
@@ -79,9 +83,9 @@ class DPDPKit:
         **kit_kwargs: Any,
     ) -> None:
         if repository is None:
-            if not db_url:
-                raise ConfigError("pass db_url or repository")
-            repository = SqlAlchemyRepository(db_url)
+            if not (db_url or engine):
+                raise ConfigError("pass db_url, engine or repository")
+            repository = SqlAlchemyRepository(engine if engine is not None else db_url)
         self.repository = repository
         if migrate_on_startup:
             self.migrate()
@@ -166,6 +170,15 @@ class DPDPKit:
     def request_metadata(request: Request) -> dict[str, Any]:
         """Evidence stored with consent events. No IP address or personal data by default."""
         return {"channel": "web", "user_agent_present": "user-agent" in request.headers}
+
+    # ------------------------------------------------------------------ async
+
+    async def run(self, fn: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
+        """Call a kit method from ``async def`` code without blocking the event loop::
+
+        allowed = await dpdp.run(dpdp.kit.consent.check, user_id, "marketing")
+        """
+        return await run_in_threadpool(fn, *args, **kwargs)
 
     # ------------------------------------------------------------------ consent dependency
 

@@ -9,6 +9,8 @@ All code packages in the dpdpkit release train share one version number.
   sent by the scheduler with exponential backoff (10 attempts, about 4 hours) and kept as dead letters
   after that. `DPDPKit(webhooks=[...])` or `webhooks:` in dpdpkit.yaml (secrets via `secret_env`).
 - CLI: `dpdpkit webhooks list|dead|send|retry`.
+- Async apps: `DPDPKit(engine=AsyncEngine)` or an async `db_url` (asyncpg, aiosqlite, aiomysql, asyncmy)
+  connects with the matching sync driver; `await dpdp.run(fn, *args)` calls kit methods off the event loop.
 - `start_scheduler()` exports the ledger root hash daily (`root_export_hour`, `root_sinks`); `export_root_job()`.
 
 ### Changed

@@ -9,13 +9,13 @@ from collections.abc import Collection, Iterator
 from typing import Any, TypeVar
 
 from pydantic import BaseModel
-from sqlalchemy import Engine, create_engine, event, select
+from sqlalchemy import URL, Engine, create_engine, event, make_url, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from dpdpkit._util import as_utc
-from dpdpkit.errors import SequenceConflict
+from dpdpkit.errors import ConfigError, SequenceConflict
 from dpdpkit.models import (
     ACTIVE_SCHEDULE_STATUSES,
     AuditEntry,
@@ -47,8 +47,37 @@ from .db import (
 M = TypeVar("M", bound=BaseModel)
 
 
-def make_engine(url: str, **kwargs: Any) -> Engine:
-    """Create an engine with settings dpdpkit relies on (SQLite savepoints, shared in-memory DB)."""
+# Async drivers and the sync driver dpdpkit uses for the same database. dpdpkit's core is synchronous;
+# it runs in a threadpool, so an async app keeps its event loop free while sharing the database.
+SYNC_DRIVERS = {
+    "postgresql+asyncpg": "postgresql+psycopg",
+    "postgresql+psycopg_async": "postgresql+psycopg",
+    "sqlite+aiosqlite": "sqlite",
+    "mysql+aiomysql": "mysql+pymysql",
+    "mysql+asyncmy": "mysql+pymysql",
+}
+
+
+def sync_url(url: str | URL) -> str:
+    """The URL dpdpkit connects with: async driver URLs become their sync equivalent."""
+    parsed = make_url(url)
+    driver = parsed.drivername
+    if driver in SYNC_DRIVERS:
+        parsed = parsed.set(drivername=SYNC_DRIVERS[driver])
+    elif driver.split("+")[-1].startswith("async") or driver.split("+")[-1].startswith("aio"):
+        raise ConfigError(
+            f"no sync driver known for {driver}; pass a sync URL (for example postgresql+psycopg://...)",
+            driver=driver,
+        )
+    return parsed.render_as_string(hide_password=False)
+
+
+def make_engine(url: str | URL, **kwargs: Any) -> Engine:
+    """Create an engine with settings dpdpkit relies on (SQLite savepoints, shared in-memory DB).
+
+    Async URLs (``postgresql+asyncpg://``, ``sqlite+aiosqlite://`` ...) are accepted and connect with the
+    matching sync driver, which must be installed (``dpdpkit-fastapi[postgres]`` or ``[mysql]``)."""
+    url = sync_url(url)
     if url.startswith("sqlite"):
         kwargs.setdefault("connect_args", {"check_same_thread": False})
         if url in ("sqlite://", "sqlite:///:memory:"):
@@ -76,8 +105,17 @@ def _load(cls: type[M], doc: dict[str, Any]) -> M:
 
 
 class SqlAlchemyRepository:
-    def __init__(self, engine: Engine | str) -> None:
-        self.engine = make_engine(engine) if isinstance(engine, str) else engine
+    def __init__(self, engine: Engine | str | Any) -> None:
+        """``engine`` is a URL, an ``Engine``, or the app's ``AsyncEngine`` (dpdpkit then opens its own
+        small sync pool to the same database)."""
+        if isinstance(engine, Engine):
+            self.engine = engine
+        elif isinstance(engine, str | URL):
+            self.engine = make_engine(engine)
+        elif hasattr(engine, "sync_engine"):  # sqlalchemy.ext.asyncio.AsyncEngine
+            self.engine = make_engine(engine.url)
+        else:
+            raise ConfigError(f"unsupported engine {engine!r}: pass a URL, Engine or AsyncEngine")
         self.Session = sessionmaker(self.engine, expire_on_commit=False)
         self._local = threading.local()
 

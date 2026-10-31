@@ -38,6 +38,8 @@ dev = [
   "ruff>=0.6",
   "mypy>=1.11",
   "apscheduler>=3.10,<4",
+  "aiosqlite>=0.20",
+  "greenlet>=3",
 ]
 
 [project.entry-points."dpdpkit.cli"]
