@@ -4,6 +4,12 @@ All code packages in the dpdpkit release train share one version number.
 
 ## Unreleased
 
+### Added
+- `start_scheduler()` exports the ledger root hash daily (`root_export_hour`, `root_sinks`); `export_root_job()`.
+
+### Changed
+- Requires the dpdpkit-core release that adds `RootSink` (next in the train after 0.1.0a1).
+
 ## 0.1.0a1 - 2026-09-27
 
 ### Added

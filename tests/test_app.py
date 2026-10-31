@@ -10,9 +10,9 @@ import pytest
 from fastapi import Depends, FastAPI, Request
 from fastapi.testclient import TestClient
 
-from dpdpkit import Contact, MemoryNotifier
+from dpdpkit import Contact, FileRootSink, MemoryNotifier
 from dpdpkit.fastapi import DPDPKit, require_consent
-from dpdpkit.models import ScheduleStatus
+from dpdpkit.models import RootHash, ScheduleStatus
 
 EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "fastapi_shop"
 CONFIG = EXAMPLE / "dpdpkit.yaml"
@@ -112,6 +112,30 @@ def test_ledger_verify_endpoint_reports_tamper(setup: tuple[TestClient, DPDPKit]
     body = client.post("/dpdp/admin/ledger/verify", headers={"X-Role": "viewer"}).json()
     assert body["ok"] is False and body["failed_row"]
     assert dpdp.verify_ledger_job() is False
+
+
+def test_root_export_job_and_schedule(setup: tuple[TestClient, DPDPKit], tmp_path: Path) -> None:
+    _, dpdp = setup
+    sink = FileRootSink(tmp_path / "roots.jsonl")
+    root = dpdp.export_root_job(sink)
+    assert root is not None and sink.latest(dpdp.kit.tenant_id) == root
+    dpdp.kit.ledger.check_root(root)
+
+    class Broken:
+        def write(self, root: RootHash) -> None:
+            raise OSError("bucket unavailable")
+
+    assert dpdp.export_root_job(Broken()) is None
+
+    scheduler = dpdp.start_scheduler(root_sinks=[sink])
+    try:
+        assert {j.id for j in scheduler.get_jobs()} == {
+            "dpdpkit-retention",
+            "dpdpkit-ledger-verify",
+            "dpdpkit-ledger-root-export",
+        }
+    finally:
+        scheduler.shutdown(wait=False)
 
 
 def test_admin_placeholder_is_served(setup: tuple[TestClient, DPDPKit]) -> None:

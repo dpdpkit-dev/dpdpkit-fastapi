@@ -54,8 +54,10 @@ dpdpkit migrate --db-url "$DATABASE_URL"        # Alembic migrations shipped in 
 Run the scheduler in one process (or call `dpdpkit retention run` from cron):
 
 ```python
-dpdp.start_scheduler(retention_minutes=15)  # retention run + daily ledger verification
+dpdp.start_scheduler(retention_minutes=15)  # retention run + daily ledger verification and root-hash export
 ```
+
+The step-by-step guide is the [FastAPI quickstart](https://dpdpkit-dev.github.io/dpdpkit-docs/dev/getting-started/fastapi/).
 
 ## What you get
 

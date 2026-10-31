@@ -19,8 +19,10 @@ from starlette.responses import Response
 from dpdpkit import Kit, Registry
 from dpdpkit.config import kit_from_config, load_config, sync_notice
 from dpdpkit.errors import ConfigError, DpdpkitError
+from dpdpkit.events import LEDGER_TAMPERED
 from dpdpkit.kit import ContactResolver
-from dpdpkit.models import Role
+from dpdpkit.ledger import RootSink
+from dpdpkit.models import Role, RootHash
 from dpdpkit.notify import Notifier
 from dpdpkit.policy import Policy
 from dpdpkit.repository import Repository
@@ -199,8 +201,19 @@ class DPDPKit:
 
     # ------------------------------------------------------------------ jobs and schema
 
-    def start_scheduler(self, *, retention_minutes: int = 15, verify_hour: int = 2) -> Any:
-        """Run retention every ``retention_minutes`` and ledger verification daily (APScheduler)."""
+    def start_scheduler(
+        self,
+        *,
+        retention_minutes: int = 15,
+        verify_hour: int = 2,
+        root_export_hour: int | None = 3,
+        root_sinks: Iterable[RootSink] = (),
+    ) -> Any:
+        """Run retention every ``retention_minutes``, ledger verification daily at ``verify_hour`` and
+        a root-hash export daily at ``root_export_hour`` UTC (``None`` disables it) (APScheduler).
+
+        The export writes to each of ``root_sinks`` and publishes ``ledger.root_exported``; subscribe a
+        webhook to that event to hand a copy to a third party."""
         try:
             from apscheduler.schedulers.background import BackgroundScheduler  # type: ignore[import-untyped]
         except ImportError as exc:  # pragma: no cover
@@ -217,6 +230,16 @@ class DPDPKit:
         scheduler.add_job(
             self.verify_ledger_job, "cron", hour=verify_hour, id="dpdpkit-ledger-verify", max_instances=1, coalesce=True
         )
+        if root_export_hour is not None:
+            sinks = tuple(root_sinks)
+            scheduler.add_job(
+                lambda: self.export_root_job(*sinks),
+                "cron",
+                hour=root_export_hour,
+                id="dpdpkit-ledger-root-export",
+                max_instances=1,
+                coalesce=True,
+            )
         scheduler.start()
         self._scheduler = scheduler
         return scheduler
@@ -227,8 +250,16 @@ class DPDPKit:
             log.error(
                 "dpdpkit ledger verification FAILED at row %s (%s): %s", report.failed_row, report.chain, report.reason
             )
-            self.kit.events.publish("ledger.tampered", self.kit.tenant_id, report.model_dump(mode="json"))
+            self.kit.events.publish(LEDGER_TAMPERED, self.kit.tenant_id, report.model_dump(mode="json"))
         return report.ok
+
+    def export_root_job(self, *sinks: RootSink) -> RootHash | None:
+        """Export the ledger root hash. A failing sink is logged and the job reports ``None``."""
+        try:
+            return self.kit.ledger.export_root(*sinks)
+        except Exception:
+            log.exception("dpdpkit root-hash export failed")
+            return None
 
     def migrate(self, revision: str = "head") -> None:
         from .migrations import upgrade
