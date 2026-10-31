@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import contextlib
+import contextvars
 import datetime as dt
-import threading
-from collections.abc import Collection, Iterator
+from collections.abc import Callable, Collection, Iterator
 from typing import Any, TypeVar
 
 from pydantic import BaseModel
@@ -84,16 +84,45 @@ def make_engine(url: str | URL, **kwargs: Any) -> Engine:
             kwargs.setdefault("poolclass", StaticPool)
     engine = create_engine(url, **kwargs)
     if engine.dialect.name == "sqlite":
-        # pysqlite's own transaction handling breaks SAVEPOINT; take control of BEGIN ourselves.
-        @event.listens_for(engine, "connect")
-        def _connect(dbapi_conn: Any, _record: Any) -> None:
-            dbapi_conn.isolation_level = None
-
-        @event.listens_for(engine, "begin")
-        def _begin(conn: Any) -> None:
-            conn.exec_driver_sql("BEGIN")
-
+        # Web workers write from many threads. Wait for the lock instead of failing with "database is
+        # locked", and take it at BEGIN: a deferred transaction that later upgrades to a write can deadlock
+        # with another writer, and SQLite then fails at once instead of waiting.
+        on_disk = engine.url.database not in (None, "", ":memory:")
+        event.listen(engine, "connect", _sqlite_wal if on_disk else _sqlite_busy_timeout)
+        enable_sqlite_savepoints(engine, begin=_sqlite_begin_immediate)
     return engine
+
+
+def _sqlite_busy_timeout(dbapi_conn: Any, _record: Any) -> None:
+    dbapi_conn.execute("PRAGMA busy_timeout = 30000")
+
+
+def _sqlite_wal(dbapi_conn: Any, record: Any) -> None:
+    _sqlite_busy_timeout(dbapi_conn, record)
+    dbapi_conn.execute("PRAGMA journal_mode = WAL")
+
+
+def _sqlite_connect(dbapi_conn: Any, _record: Any) -> None:
+    dbapi_conn.isolation_level = None
+
+
+def _sqlite_begin(conn: Any) -> None:
+    conn.exec_driver_sql("BEGIN")
+
+
+def _sqlite_begin_immediate(conn: Any) -> None:
+    conn.exec_driver_sql("BEGIN IMMEDIATE")
+
+
+def enable_sqlite_savepoints(engine: Any, *, begin: Callable[[Any], None] = _sqlite_begin) -> None:
+    """pysqlite's own transaction handling breaks SAVEPOINT; take control of BEGIN ourselves.
+
+    Accepts an ``Engine`` or ``AsyncEngine``; does nothing for other databases or if already applied."""
+    engine = getattr(engine, "sync_engine", engine)
+    if engine.dialect.name != "sqlite" or event.contains(engine, "connect", _sqlite_connect):
+        return
+    event.listen(engine, "connect", _sqlite_connect)
+    event.listen(engine, "begin", begin)
 
 
 def _doc(model: BaseModel) -> dict[str, Any]:
@@ -114,10 +143,14 @@ class SqlAlchemyRepository:
             self.engine = make_engine(engine)
         elif hasattr(engine, "sync_engine"):  # sqlalchemy.ext.asyncio.AsyncEngine
             self.engine = make_engine(engine.url)
+            # The app's sessions may be bound with run_in_session(); give them working savepoints too.
+            enable_sqlite_savepoints(engine)
         else:
             raise ConfigError(f"unsupported engine {engine!r}: pass a URL, Engine or AsyncEngine")
         self.Session = sessionmaker(self.engine, expire_on_commit=False)
-        self._local = threading.local()
+        # The session kit calls currently use. A context variable rather than a thread-local: sessions bound
+        # by DPDPKit.run_in_session() run in a greenlet on the event loop thread, shared by other requests.
+        self._current: contextvars.ContextVar[Session | None] = contextvars.ContextVar("dpdpkit_session", default=None)
 
     def create_all(self) -> None:
         """Create tables directly (tests and demos). Production installs use ``dpdpkit migrate``."""
@@ -127,11 +160,11 @@ class SqlAlchemyRepository:
 
     @contextlib.contextmanager
     def transaction(self) -> Iterator[None]:
-        if getattr(self._local, "session", None) is not None:
+        if self._current.get() is not None:
             yield
             return
         session = self.Session()
-        self._local.session = session
+        token = self._current.set(session)
         try:
             yield
             session.commit()
@@ -140,11 +173,29 @@ class SqlAlchemyRepository:
             raise
         finally:
             session.close()
-            self._local.session = None
+            self._current.reset(token)
+
+    @contextlib.contextmanager
+    def bind(self, session: Session) -> Iterator[Session]:
+        """Run kit calls inside the app's own ``Session``, so they commit or roll back with its work::
+
+            with Session(engine) as s, s.begin(), dpdp.repository.bind(s):
+                s.add(Order(...))
+                dpdp.kit.consent.grant(user_id, "marketing")
+
+        dpdpkit never commits a bound session; each write runs in a savepoint. For an ``AsyncSession`` use
+        ``await dpdp.run_in_session(session, fn, ...)``."""
+        if self._current.get() is not None:
+            raise ConfigError("a dpdpkit session is already active; bind() cannot be nested")
+        token = self._current.set(session)
+        try:
+            yield session
+        finally:
+            self._current.reset(token)
 
     @contextlib.contextmanager
     def _session(self) -> Iterator[Session]:
-        current: Session | None = getattr(self._local, "session", None)
+        current = self._current.get()
         if current is not None:
             yield current
             return

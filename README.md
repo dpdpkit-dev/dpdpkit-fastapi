@@ -57,13 +57,26 @@ Run the scheduler in one process (or call `dpdpkit retention run` from cron):
 dpdp.start_scheduler(retention_minutes=15)  # retention run + daily ledger verification and root-hash export
 ```
 
+In an async app, pass your `AsyncEngine` (or an async `db_url`). Call kit methods with `await dpdp.run(...)`, or
+inside your own `AsyncSession` so consent changes commit or roll back with your writes:
+
+```python
+dpdp = DPDPKit(engine=async_engine, principal_resolver=current_user, config="dpdpkit.yaml")
+
+async with AsyncSession(async_engine) as s, s.begin():
+    s.add(Order(user_id=user_id))
+    await dpdp.run_in_session(s, dpdp.kit.consent.grant, user_id, "marketing")
+```
+
+Sync apps use `with dpdp.bind(session): ...` the same way.
+
 The step-by-step guide is the [FastAPI quickstart](https://dpdpkit-dev.github.io/dpdpkit-docs/dev/getting-started/fastapi/).
 
 ## What you get
 
 | Component | Detail |
 | --- | --- |
-| `SqlAlchemyRepository` | SQLAlchemy 2.0; Postgres, MySQL, SQLite; accepts async URLs and `AsyncEngine`; microsecond timestamps so ledger hashes survive round trips |
+| `SqlAlchemyRepository` | SQLAlchemy 2.0; Postgres, MySQL, SQLite; accepts async URLs and `AsyncEngine`, joins your `Session` or `AsyncSession`; microsecond timestamps so ledger hashes survive round trips |
 | Migrations | Alembic, forward-only, shipped in the package (`dpdpkit migrate`) |
 | Router | Full REST contract from [`dpdpkit-spec`](https://github.com/dpdpkit-dev/dpdpkit-spec) |
 | `require_consent()` | Dependency returning 403 `consent_required` with the purpose |

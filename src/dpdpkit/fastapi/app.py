@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
+import contextlib
 import inspect
 import logging
 import time
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from importlib import resources
 from pathlib import Path
-from typing import Any, ParamSpec, TypeVar
+from typing import TYPE_CHECKING, Any, ParamSpec, TypeVar
 
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.responses import Response
@@ -32,6 +34,9 @@ from .http import ConsentRequiredHTTP, Forbidden, Unauthenticated, consent_requi
 from .repository import SqlAlchemyRepository
 from .router import build_router
 from .webhooks import WebhookOutbox, endpoints_from_config
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 log = logging.getLogger("dpdpkit.fastapi")
 
@@ -179,6 +184,33 @@ class DPDPKit:
         allowed = await dpdp.run(dpdp.kit.consent.check, user_id, "marketing")
         """
         return await run_in_threadpool(fn, *args, **kwargs)
+
+    def bind(self, session: Session) -> contextlib.AbstractContextManager[Session]:
+        """Run kit calls inside the app's sync ``Session``; see :meth:`SqlAlchemyRepository.bind`."""
+        return self._sql_repository().bind(session)
+
+    def _sql_repository(self) -> SqlAlchemyRepository:
+        if not isinstance(self.repository, SqlAlchemyRepository):
+            raise ConfigError("binding an app session needs the SqlAlchemyRepository")
+        return self.repository
+
+    async def run_in_session(self, session: AsyncSession, fn: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
+        """Call a kit method inside the app's ``AsyncSession``, so its writes commit or roll back with the
+        app's own work::
+
+            async with AsyncSession(engine) as s, s.begin():
+                s.add(Order(...))
+                await dpdp.run_in_session(s, dpdp.kit.consent.grant, user_id, "marketing")
+
+        dpdpkit never commits the session. The call runs through ``AsyncSession.run_sync`` on the event
+        loop, so keep it to database work; event listeners see the event before the app commits."""
+        repository = self._sql_repository()
+
+        def call(sync_session: Session) -> T:
+            with repository.bind(sync_session):
+                return fn(*args, **kwargs)
+
+        return await session.run_sync(call)
 
     # ------------------------------------------------------------------ consent dependency
 

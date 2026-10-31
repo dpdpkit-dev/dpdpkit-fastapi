@@ -151,3 +151,31 @@ def test_holds_activity_and_deliveries(kit: Kit) -> None:
     assert kit.repository.last_activity(kit.tenant_id, "u1") == T0
     kit.rights.open("u1", "nomination", {"name": "A", "contact": "a@example.in"})
     assert len(kit.rights.nominees("u1")) == 1
+
+
+def test_sqlite_file_handles_concurrent_writers(tmp_path: Path) -> None:
+    """Web workers write from many threads; SQLite must queue them, not fail with "database is locked"."""
+    import threading
+
+    repo = SqlAlchemyRepository(f"sqlite:///{tmp_path / 'busy.db'}")
+    upgrade(repo.engine)
+    kit = kit_from_config(yaml.safe_load(STARTER_CONFIG), repo, signing_key="k")
+    sync_notice(kit, yaml.safe_load(STARTER_CONFIG))
+    errors: list[BaseException] = []
+
+    def worker(n: int) -> None:
+        try:
+            for i in range(15):
+                kit.retention.record_activity(f"u{n}")
+                kit.consent.grant(f"u{n}-{i}", "marketing")
+        except BaseException as exc:
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker, args=(n,)) for n in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == []
+    assert len(repo.list_consent_events(kit.tenant_id)) == 8 * 15
+    kit.ledger.verify()

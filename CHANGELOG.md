@@ -11,9 +11,13 @@ All code packages in the dpdpkit release train share one version number.
 - CLI: `dpdpkit webhooks list|dead|send|retry`.
 - Async apps: `DPDPKit(engine=AsyncEngine)` or an async `db_url` (asyncpg, aiosqlite, aiomysql, asyncmy)
   connects with the matching sync driver; `await dpdp.run(fn, *args)` calls kit methods off the event loop.
+- App sessions: `await dpdp.run_in_session(async_session, fn, *args)` and `with dpdp.bind(session):` run kit
+  calls inside the app's own transaction, in savepoints, so they commit or roll back with the app's writes.
 - `start_scheduler()` exports the ledger root hash daily (`root_export_hour`, `root_sinks`); `export_root_job()`.
 
 ### Changed
+- SQLite: dpdpkit's engine waits for locks (`busy_timeout` 30 s), uses WAL for file databases and starts
+  transactions with `BEGIN IMMEDIATE`, so concurrent writers no longer fail with "database is locked".
 - Requires the dpdpkit-core release that adds `RootSink` (next in the train after 0.1.0a1).
 
 ## 0.1.0a1 - 2026-09-27
