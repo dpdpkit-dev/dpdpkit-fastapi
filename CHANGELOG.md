@@ -5,6 +5,7 @@ All code packages in the dpdpkit release train share one version number.
 ## Unreleased
 
 ### Added
+- `GET /admin/consent/stats` (viewer role): grants, denials and withdrawals per purpose and notice version.
 - Incident endpoints: `GET, POST /admin/incidents`, `GET /admin/incidents/{id}` and
   `GET /admin/incidents/{id}/report?kind=` (a Markdown draft; nothing is submitted to any authority). Incident
   and principal-notice storage in `dpdp_incidents` and `dpdp_principal_notices` (migration `0003`).

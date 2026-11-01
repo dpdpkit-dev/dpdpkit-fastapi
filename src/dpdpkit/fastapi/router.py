@@ -232,6 +232,10 @@ def build_router(dk: "DPDPKit") -> APIRouter:
             req = rights.reject(request_id, body.message or "", actor=actor)
         return request_out(req, kit.now(), admin=True)
 
+    @router.get("/admin/consent/stats", dependencies=[role(Role.VIEWER)])
+    def consent_stats() -> dict[str, Any]:
+        return {"items": [s.model_dump(mode="json") for s in kit.consent.stats()]}
+
     @router.get("/admin/retention/preview", dependencies=[role(Role.VIEWER)])
     def retention_preview(hours: Annotated[int, Query(ge=1)] = 168) -> dict[str, Any]:
         items = kit.retention.preview(horizon=dt.timedelta(hours=hours))
