@@ -29,6 +29,8 @@ dependencies = [
 
 [project.optional-dependencies]
 scheduler = ["apscheduler>=3.10,<4"]
+celery = ["celery>=5.3"]
+arq = ["arq>=0.25"]
 postgres = ["psycopg[binary]>=3.1"]
 mysql = ["pymysql>=1.1"]
 dev = [

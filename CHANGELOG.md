@@ -13,6 +13,9 @@ All code packages in the dpdpkit release train share one version number.
   connects with the matching sync driver; `await dpdp.run(fn, *args)` calls kit methods off the event loop.
 - App sessions: `await dpdp.run_in_session(async_session, fn, *args)` and `with dpdp.bind(session):` run kit
   calls inside the app's own transaction, in savepoints, so they commit or roll back with the app's writes.
+- Celery and Arq entry points (`dpdpkit.fastapi.tasks`): `register_celery(celery_app, dpdp)` adds the
+  retention, ledger-verify, root-export and webhook-delivery tasks plus a beat schedule;
+  `arq_functions(dpdp)` and `arq_cron_jobs(dpdp)` do the same for Arq. Extras: `celery`, `arq`.
 - `start_scheduler()` exports the ledger root hash daily (`root_export_hour`, `root_sinks`); `export_root_job()`.
 
 ### Changed
