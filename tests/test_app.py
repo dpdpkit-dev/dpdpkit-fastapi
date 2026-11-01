@@ -81,9 +81,35 @@ def test_roles(setup: tuple[TestClient, DPDPKit]) -> None:
     assert client.get("/dpdp/admin/requests", headers={"X-Role": "superuser"}).status_code == 401
 
 
-def test_incidents_not_yet_implemented(setup: tuple[TestClient, DPDPKit]) -> None:
+def test_incident_register_and_report_draft(setup: tuple[TestClient, DPDPKit], clock: Clock) -> None:
+    client, dpdp = setup
+    handler = {"X-Role": "handler"}
+    aware = clock.now - dt.timedelta(hours=2)
+    body = {"title": "Leaked export", "aware_at": aware.isoformat(), "affected_count": 5, "severity": "high"}
+    assert client.post("/dpdp/admin/incidents", json=body, headers={"X-Role": "viewer"}).status_code == 403
+    created = client.post("/dpdp/admin/incidents", json=body, headers=handler)
+    assert created.status_code == 201, created.text
+    inc = created.json()
+    assert inc["status"] == "open" and inc["severity"] == "high"
+    assert dt.datetime.fromisoformat(inc["board_report_due"]) == aware + dt.timedelta(hours=72)
+    assert [c["kind"] for c in inc["clocks"]][:2] == ["board_initial", "board_detailed"]
+
+    listed = client.get("/dpdp/admin/incidents?open=true", headers={"X-Role": "viewer"}).json()["items"]
+    assert [i["id"] for i in listed] == [inc["id"]]
+    assert client.get(f"/dpdp/admin/incidents/{inc['id']}", headers={"X-Role": "viewer"}).json()["id"] == inc["id"]
+
+    report = client.get(f"/dpdp/admin/incidents/{inc['id']}/report?kind=cert_in", headers=handler)
+    assert report.status_code == 200 and report.headers["content-type"].startswith("text/markdown")
+    assert "DRAFT" in report.text and "[TO COMPLETE" in report.text
+    assert report.headers["x-dpdp-missing"]
+    assert client.get("/dpdp/admin/incidents/nope/report", headers=handler).json()["error"]["code"] == "not_found"
+    assert client.post("/dpdp/admin/incidents", json={"title": "x"}, headers=handler).status_code == 422
+    assert dpdp.kit.incidents.get(inc["id"]).created_by == "handler"
+
+
+def test_guardian_endpoints_not_yet_implemented(setup: tuple[TestClient, DPDPKit]) -> None:
     client, _ = setup
-    resp = client.get("/dpdp/admin/incidents", headers={"X-Role": "admin"})
+    resp = client.post("/dpdp/guardian/verify/start", json={"method": "existing_kyc"}, headers={"X-User": "u1"})
     assert resp.status_code == 501 and resp.json()["error"]["code"] == "not_implemented"
 
 

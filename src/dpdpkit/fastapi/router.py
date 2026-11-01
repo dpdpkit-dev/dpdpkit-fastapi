@@ -16,7 +16,11 @@ from dpdpkit.errors import ValidationFailed
 from dpdpkit.models import (
     ConsentReceipt,
     ConsentState,
+    Incident,
+    IncidentClock,
+    IncidentSeverity,
     Notice,
+    ReportKind,
     RequestKind,
     RequestStatus,
     RightsRequest,
@@ -61,6 +65,20 @@ class ActivityIn(BaseModel):
     at: dt.datetime | None = None
 
 
+class IncidentIn(BaseModel):
+    title: str = Field(min_length=1)
+    aware_at: dt.datetime
+    detected_at: dt.datetime | None = None
+    severity: IncidentSeverity = IncidentSeverity.MEDIUM
+    description: str = ""
+    affected_count: int | None = Field(default=None, ge=0)
+    data_items: list[str] = Field(default_factory=list)
+    root_cause: str = ""
+    remediation: str = ""
+    likely_consequences: str = ""
+    safety_steps: str = ""
+
+
 # --------------------------------------------------------------------------- response shapes
 
 
@@ -94,6 +112,17 @@ def request_out(req: RightsRequest, now: dt.datetime, *, admin: bool = False) ->
     )
     data = req.model_dump(mode="json", exclude=hidden)
     data["overdue"] = req.closed_at is None and now > req.due_at
+    return data
+
+
+def incident_out(inc: Incident, clocks: list[IncidentClock]) -> dict[str, Any]:
+    data = inc.model_dump(mode="json", exclude={"tenant_id"})
+    by_kind = {c.kind: c for c in clocks}
+    board = by_kind[ReportKind.BOARD_DETAILED]
+    cert = by_kind.get(ReportKind.CERT_IN)
+    data["board_report_due"] = board.due_at.isoformat() if board.due_at else None
+    data["cert_in_report_due"] = cert.due_at.isoformat() if cert and cert.due_at else None
+    data["clocks"] = [c.model_dump(mode="json") for c in clocks]
     return data
 
 
@@ -216,16 +245,49 @@ def build_router(dk: "DPDPKit") -> APIRouter:
         }
 
     @router.get("/admin/incidents", dependencies=[role(Role.VIEWER)])
-    def list_incidents() -> None:
-        raise NotImplementedYet("the incident register ships in v0.5 (task CORE-24)")
+    def list_incidents(open: Annotated[bool, Query()] = False) -> dict[str, Any]:
+        service = kit.incidents
+        return {"items": [incident_out(i, service.clocks(i.id)) for i in service.list_incidents(open_only=open)]}
 
-    @router.post("/admin/incidents", dependencies=[role(Role.HANDLER)])
-    def create_incident() -> None:
-        raise NotImplementedYet("the incident register ships in v0.5 (task CORE-24)")
+    @router.post("/admin/incidents", status_code=201)
+    def create_incident(body: IncidentIn, actor: Annotated[str, role(Role.HANDLER)]) -> dict[str, Any]:
+        service = kit.incidents
+        inc = service.record(
+            body.title,
+            actor=actor,
+            aware_at=body.aware_at,
+            detected_at=body.detected_at,
+            severity=body.severity,
+            description=body.description,
+            affected_count=body.affected_count,
+            data_items=body.data_items,
+            root_cause=body.root_cause,
+            remediation=body.remediation,
+            likely_consequences=body.likely_consequences,
+            safety_steps=body.safety_steps,
+        )
+        return incident_out(inc, service.clocks(inc.id))
 
-    @router.get("/admin/incidents/{incident_id}/report", dependencies=[role(Role.HANDLER)])
-    def incident_report(incident_id: str) -> None:
-        raise NotImplementedYet("incident report drafts ship in v0.5 (task CORE-24)")
+    @router.get("/admin/incidents/{incident_id}", dependencies=[role(Role.VIEWER)])
+    def get_incident(incident_id: str) -> dict[str, Any]:
+        service = kit.incidents
+        return incident_out(service.get(incident_id), service.clocks(incident_id))
+
+    @router.get("/admin/incidents/{incident_id}/report", dependencies=[role(Role.HANDLER)], response_model=None)
+    def incident_report(incident_id: str, kind: ReportKind = ReportKind.BOARD_DETAILED) -> Response:
+        draft = kit.incidents.draft_report(incident_id, kind)
+        headers = {"X-DPDP-Missing": "; ".join(draft.missing)} if draft.missing else None
+        return Response(draft.body, media_type="text/markdown; charset=utf-8", headers=headers)
+
+    # ------------------------------------------------------------------ guardians
+
+    @router.post("/guardian/verify/start", status_code=202)
+    def guardian_start(who: Principal) -> None:
+        raise NotImplementedYet("guardian verification ships with dpdpkit.guardians (task CORE-25)")
+
+    @router.post("/guardian/verify/callback")
+    def guardian_callback(who: Principal) -> None:
+        raise NotImplementedYet("guardian verification ships with dpdpkit.guardians (task CORE-25)")
 
     @router.get("/admin/audit/export", dependencies=[role(Role.ADMIN)], response_model=None)
     def audit_export() -> Response:

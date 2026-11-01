@@ -23,9 +23,12 @@ from dpdpkit.models import (
     ConsentEvent,
     DeliveryReceipt,
     ErasureSchedule,
+    Incident,
+    IncidentStatus,
     LegalHold,
     Nominee,
     Notice,
+    PrincipalNotice,
     RequestStatus,
     RightsRequest,
     ScheduleStatus,
@@ -38,8 +41,10 @@ from .db import (
     ConsentEventRow,
     DeliveryRow,
     HoldRow,
+    IncidentRow,
     NomineeRow,
     NoticeRow,
+    PrincipalNoticeRow,
     RequestRow,
     ScheduleRow,
 )
@@ -511,3 +516,49 @@ class SqlAlchemyRepository:
         with self._session() as s:
             row = s.get(DeliveryRow, receipt_id)
             return _load(DeliveryReceipt, row.doc) if row and row.tenant_id == tenant_id else None
+
+    # ------------------------------------------------------------------ incidents
+
+    def save_incident(self, incident: Incident) -> None:
+        with self._session() as s:
+            s.merge(
+                IncidentRow(
+                    id=incident.id,
+                    tenant_id=incident.tenant_id,
+                    status=incident.status.value,
+                    aware_at=as_utc(incident.aware_at),
+                    doc=_doc(incident),
+                )
+            )
+
+    def get_incident(self, tenant_id: str, incident_id: str) -> Incident | None:
+        with self._session() as s:
+            row = s.get(IncidentRow, incident_id)
+            return _load(Incident, row.doc) if row and row.tenant_id == tenant_id else None
+
+    def list_incidents(self, tenant_id: str, *, status: IncidentStatus | None = None) -> list[Incident]:
+        q = select(IncidentRow).where(IncidentRow.tenant_id == tenant_id)
+        if status is not None:
+            q = q.where(IncidentRow.status == status.value)
+        with self._session() as s:
+            return [_load(Incident, r.doc) for r in s.scalars(q.order_by(IncidentRow.aware_at, IncidentRow.id))]
+
+    def save_principal_notice(self, notice: PrincipalNotice) -> None:
+        with self._session() as s:
+            s.merge(
+                PrincipalNoticeRow(
+                    id=notice.id,
+                    tenant_id=notice.tenant_id,
+                    incident_id=notice.incident_id,
+                    created_at=as_utc(notice.created_at),
+                    doc=_doc(notice),
+                )
+            )
+
+    def list_principal_notices(self, tenant_id: str, incident_id: str) -> list[PrincipalNotice]:
+        q = select(PrincipalNoticeRow).where(
+            PrincipalNoticeRow.tenant_id == tenant_id, PrincipalNoticeRow.incident_id == incident_id
+        )
+        with self._session() as s:
+            rows = s.scalars(q.order_by(PrincipalNoticeRow.created_at, PrincipalNoticeRow.id))
+            return [_load(PrincipalNotice, r.doc) for r in rows]

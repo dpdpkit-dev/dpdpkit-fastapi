@@ -152,6 +152,28 @@ class DeliveryRow(Base):
     doc: Mapped[dict[str, Any]]
 
 
+class IncidentRow(Base):
+    __tablename__ = "dpdp_incidents"
+    __table_args__ = (Index("ix_dpdp_incidents_status", "tenant_id", "status"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(16))
+    aware_at: Mapped[dt.datetime]
+    doc: Mapped[dict[str, Any]]
+
+
+class PrincipalNoticeRow(Base):
+    __tablename__ = "dpdp_principal_notices"
+    __table_args__ = (Index("ix_dpdp_principal_notices_incident", "tenant_id", "incident_id"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64))
+    incident_id: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[dt.datetime]
+    doc: Mapped[dict[str, Any]]
+
+
 class WebhookDeliveryRow(Base):
     """Outbox for outbound webhooks: one row per (endpoint, event). Secrets are never stored here."""
 
