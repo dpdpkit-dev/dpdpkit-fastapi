@@ -11,11 +11,15 @@ from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
-from dpdpkit._util import as_utc
-from dpdpkit.errors import ValidationFailed
+from dpdpkit._util import as_utc, new_id
+from dpdpkit.errors import NotFound, ValidationFailed
 from dpdpkit.models import (
+    AgeAssertion,
     ConsentReceipt,
     ConsentState,
+    GuardianBasis,
+    GuardianRelationship,
+    GuardianVerification,
     Incident,
     IncidentClock,
     IncidentSeverity,
@@ -25,9 +29,10 @@ from dpdpkit.models import (
     RequestStatus,
     RightsRequest,
     Role,
+    VerificationStatus,
 )
 
-from .http import DpdpRoute, NotImplementedYet
+from .http import DpdpRoute
 
 if TYPE_CHECKING:
     from .app import DPDPKit
@@ -60,6 +65,9 @@ class AdminUpdateIn(BaseModel):
     message: str | None = None
 
 
+GuardianMethod = Literal["existing_kyc", "digilocker_token", "partner_token", "court_order"]
+
+
 class ActivityIn(BaseModel):
     principal: str = Field(min_length=1)
     at: dt.datetime | None = None
@@ -77,6 +85,16 @@ class IncidentIn(BaseModel):
     remediation: str = ""
     likely_consequences: str = ""
     safety_steps: str = ""
+
+
+class GuardianStartIn(BaseModel):
+    method: GuardianMethod
+    guardian_ref: str | None = Field(default=None, min_length=1)
+
+
+class GuardianCallbackIn(BaseModel):
+    verification_id: str = Field(min_length=1)
+    token: str | None = None
 
 
 # --------------------------------------------------------------------------- response shapes
@@ -124,6 +142,17 @@ def incident_out(inc: Incident, clocks: list[IncidentClock]) -> dict[str, Any]:
     data["cert_in_report_due"] = cert.due_at.isoformat() if cert and cert.due_at else None
     data["clocks"] = [c.model_dump(mode="json") for c in clocks]
     return data
+
+
+def guardian_out(ver: GuardianVerification) -> dict[str, Any]:
+    status = "failed" if ver.status is VerificationStatus.REVOKED else ver.status.value
+    return {
+        "id": ver.id,
+        "method": ver.verifier,
+        "status": status,
+        "redirect_url": None,
+        "verified_at": ver.verified_at.isoformat() if ver.verified_at else None,
+    }
 
 
 # --------------------------------------------------------------------------- router
@@ -286,12 +315,45 @@ def build_router(dk: "DPDPKit") -> APIRouter:
     # ------------------------------------------------------------------ guardians
 
     @router.post("/guardian/verify/start", status_code=202)
-    def guardian_start(who: Principal) -> None:
-        raise NotImplementedYet("guardian verification ships with dpdpkit.guardians (task CORE-25)")
+    def guardian_start(body: GuardianStartIn, who: Principal) -> dict[str, Any]:
+        service = kit.guardians
+        if body.method not in service.verifiers():
+            raise ValidationFailed(f"no verifier is configured for {body.method!r}", method=body.method)
+        if service.age_assertion(who) is None:
+            # The caller says they need a guardian, which only narrows what they may do. An age gate run by the
+            # host app (kit.guardians.assess_age) takes precedence and replaces this.
+            service._store_assertion(
+                AgeAssertion(
+                    id=new_id("age"),
+                    tenant_id=kit.tenant_id,
+                    principal=who,
+                    needs_guardian=True,
+                    basis=GuardianBasis.AGE,
+                    method="self_declared",
+                    age_of_majority=kit.policy.age_of_majority,
+                    asserted_by=who,
+                    asserted_at=kit.now(),
+                )
+            )
+        ver = service.begin_verification(
+            who,
+            body.guardian_ref or "unspecified",
+            actor=who,
+            verifier=body.method,
+            relationship=GuardianRelationship.LAWFUL_GUARDIAN
+            if body.method == "court_order"
+            else GuardianRelationship.PARENT,
+        )
+        return guardian_out(ver)
 
     @router.post("/guardian/verify/callback")
-    def guardian_callback(who: Principal) -> None:
-        raise NotImplementedYet("guardian verification ships with dpdpkit.guardians (task CORE-25)")
+    def guardian_callback(body: GuardianCallbackIn, who: Principal) -> dict[str, Any]:
+        service = kit.guardians
+        ver = service.get_verification(body.verification_id)
+        if ver.principal != who:
+            raise NotFound(f"no guardian verification {body.verification_id!r}", verification_id=body.verification_id)
+        evidence = {"token": body.token} if body.token is not None else {}
+        return guardian_out(service.confirm_verification(ver.id, evidence, actor=who))
 
     @router.get("/admin/audit/export", dependencies=[role(Role.ADMIN)], response_model=None)
     def audit_export() -> Response:

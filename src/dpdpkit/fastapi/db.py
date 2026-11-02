@@ -174,6 +174,29 @@ class PrincipalNoticeRow(Base):
     doc: Mapped[dict[str, Any]]
 
 
+class AgeAssertionRow(Base):
+    """The latest age-gate outcome per principal."""
+
+    __tablename__ = "dpdp_age_assertions"
+    __table_args__ = (UniqueConstraint("tenant_id", "principal", name="uq_dpdp_age_assertions_tenant_principal"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64))
+    principal: Mapped[str] = mapped_column(String(255))
+    doc: Mapped[dict[str, Any]]
+
+
+class GuardianVerificationRow(Base):
+    __tablename__ = "dpdp_guardian_verifications"
+    __table_args__ = (Index("ix_dpdp_guardian_verifications_principal", "tenant_id", "principal"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64))
+    principal: Mapped[str] = mapped_column(String(255))
+    created_at: Mapped[dt.datetime]
+    doc: Mapped[dict[str, Any]]
+
+
 class WebhookDeliveryRow(Base):
     """Outbox for outbound webhooks: one row per (endpoint, event). Secrets are never stored here."""
 

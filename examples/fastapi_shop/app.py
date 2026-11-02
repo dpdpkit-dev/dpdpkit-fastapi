@@ -10,12 +10,15 @@ Conformance:      DPDPKIT_CONFORMANCE=1 DPDPKIT_ASGI_APP=app:app dpdpkit-conform
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 from fastapi import Depends, FastAPI, Request
 
 from dpdpkit import ConsoleNotifier, Contact
 from dpdpkit.fastapi import DPDPKit, require_consent
+from dpdpkit.guardians import CallbackVerifier, VerifierRequest
 
 HERE = Path(__file__).parent
 CONFORMANCE = os.environ.get("DPDPKIT_CONFORMANCE") == "1"
@@ -45,6 +48,14 @@ def contact_for(principal: str) -> Contact | None:
     return Contact(email=user["email"], phone=user["phone"]) if user else None
 
 
+GUARDIAN_METHODS = ("existing_kyc", "digilocker_token", "partner_token", "court_order")
+
+
+def check_guardian_token(request: VerifierRequest, evidence: Mapping[str, Any]) -> bool:
+    """Stand-in for a call to your KYC or DigiLocker provider: only the demo token passes."""
+    return evidence.get("token") == "demo-ok"
+
+
 app = FastAPI(title="fastapi-shop (dpdpkit demo)")
 dpdp = DPDPKit(
     db_url=os.environ.get("DATABASE_URL", "sqlite://" if CONFORMANCE else f"sqlite:///{HERE / 'shop.db'}"),
@@ -54,6 +65,7 @@ dpdp = DPDPKit(
     notifier=ConsoleNotifier(),
     contact_resolver=contact_for,
     signing_key=os.environ.get("DPDPKIT_SIGNING_KEY", "dev-only-signing-key"),
+    guardian_verifiers=[CallbackVerifier(m, check_guardian_token) for m in GUARDIAN_METHODS],
     migrate_on_startup=True,
 )
 dpdp.install(app, prefix="/dpdp")

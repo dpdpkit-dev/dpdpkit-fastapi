@@ -9,7 +9,11 @@ All code packages in the dpdpkit release train share one version number.
 - Incident endpoints: `GET, POST /admin/incidents`, `GET /admin/incidents/{id}` and
   `GET /admin/incidents/{id}/report?kind=` (a Markdown draft; nothing is submitted to any authority). Incident
   and principal-notice storage in `dpdp_incidents` and `dpdp_principal_notices` (migration `0003`).
-  `/guardian/verify/*` stay `501 not_implemented` until `dpdpkit.guardians` (CORE-25) ships.
+- Guardian endpoints: `POST /guardian/verify/start` (202) and `POST /guardian/verify/callback` now run
+  `dpdpkit.guardians` instead of returning 501. Verifiers are registered with
+  `DPDPKit(guardian_verifiers=[...])`; an unconfigured method gives 422 and a confirmed adult gives 409.
+  A principal with no age assertion is recorded as a self-declared minor needing a guardian. Age assertions and
+  guardian verifications are stored in `dpdp_age_assertions` and `dpdp_guardian_verifications` (migration `0004`).
 - Durable webhooks (`WebhookOutbox`): events are queued in `dpdp_webhook_deliveries` (migration `0002`),
   sent by the scheduler with exponential backoff (10 attempts, about 4 hours) and kept as dead letters
   after that. `DPDPKit(webhooks=[...])` or `webhooks:` in dpdpkit.yaml (secrets via `secret_env`).

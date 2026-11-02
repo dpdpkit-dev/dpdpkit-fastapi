@@ -9,7 +9,7 @@ from collections.abc import Callable, Collection, Iterator
 from typing import Any, TypeVar
 
 from pydantic import BaseModel
-from sqlalchemy import URL, Engine, create_engine, event, make_url, select
+from sqlalchemy import URL, Engine, create_engine, delete, event, make_url, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -18,11 +18,13 @@ from dpdpkit._util import as_utc
 from dpdpkit.errors import ConfigError, SequenceConflict
 from dpdpkit.models import (
     ACTIVE_SCHEDULE_STATUSES,
+    AgeAssertion,
     AuditEntry,
     ConsentAction,
     ConsentEvent,
     DeliveryReceipt,
     ErasureSchedule,
+    GuardianVerification,
     Incident,
     IncidentStatus,
     LegalHold,
@@ -36,10 +38,12 @@ from dpdpkit.models import (
 
 from .db import (
     ActivityRow,
+    AgeAssertionRow,
     AuditRow,
     Base,
     ConsentEventRow,
     DeliveryRow,
+    GuardianVerificationRow,
     HoldRow,
     IncidentRow,
     NomineeRow,
@@ -562,3 +566,51 @@ class SqlAlchemyRepository:
         with self._session() as s:
             rows = s.scalars(q.order_by(PrincipalNoticeRow.created_at, PrincipalNoticeRow.id))
             return [_load(PrincipalNotice, r.doc) for r in rows]
+
+    # ------------------------------------------------------------------ guardians
+
+    def save_age_assertion(self, assertion: AgeAssertion) -> None:
+        with self._session() as s:
+            s.execute(
+                delete(AgeAssertionRow).where(
+                    AgeAssertionRow.tenant_id == assertion.tenant_id, AgeAssertionRow.principal == assertion.principal
+                )
+            )
+            s.add(
+                AgeAssertionRow(
+                    id=assertion.id, tenant_id=assertion.tenant_id, principal=assertion.principal, doc=_doc(assertion)
+                )
+            )
+
+    def latest_age_assertion(self, tenant_id: str, principal: str) -> AgeAssertion | None:
+        q = select(AgeAssertionRow).where(
+            AgeAssertionRow.tenant_id == tenant_id, AgeAssertionRow.principal == principal
+        )
+        with self._session() as s:
+            row = s.scalars(q).first()
+            return _load(AgeAssertion, row.doc) if row else None
+
+    def save_guardian_verification(self, verification: GuardianVerification) -> None:
+        with self._session() as s:
+            s.merge(
+                GuardianVerificationRow(
+                    id=verification.id,
+                    tenant_id=verification.tenant_id,
+                    principal=verification.principal,
+                    created_at=as_utc(verification.created_at),
+                    doc=_doc(verification),
+                )
+            )
+
+    def get_guardian_verification(self, tenant_id: str, verification_id: str) -> GuardianVerification | None:
+        with self._session() as s:
+            row = s.get(GuardianVerificationRow, verification_id)
+            return _load(GuardianVerification, row.doc) if row and row.tenant_id == tenant_id else None
+
+    def list_guardian_verifications(self, tenant_id: str, principal: str) -> list[GuardianVerification]:
+        q = select(GuardianVerificationRow).where(
+            GuardianVerificationRow.tenant_id == tenant_id, GuardianVerificationRow.principal == principal
+        )
+        with self._session() as s:
+            rows = s.scalars(q.order_by(GuardianVerificationRow.created_at, GuardianVerificationRow.id))
+            return [_load(GuardianVerification, r.doc) for r in rows]

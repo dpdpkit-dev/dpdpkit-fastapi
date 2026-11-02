@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 
 from dpdpkit import Contact, FileRootSink, MemoryNotifier
 from dpdpkit.fastapi import DPDPKit, require_consent
+from dpdpkit.guardians import CallbackVerifier, GuardianStatus
 from dpdpkit.models import RootHash, ScheduleStatus
 
 EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "fastapi_shop"
@@ -107,10 +108,44 @@ def test_incident_register_and_report_draft(setup: tuple[TestClient, DPDPKit], c
     assert dpdp.kit.incidents.get(inc["id"]).created_by == "handler"
 
 
-def test_guardian_endpoints_not_yet_implemented(setup: tuple[TestClient, DPDPKit]) -> None:
-    client, _ = setup
-    resp = client.post("/dpdp/guardian/verify/start", json={"method": "existing_kyc"}, headers={"X-User": "u1"})
-    assert resp.status_code == 501 and resp.json()["error"]["code"] == "not_implemented"
+def test_guardian_verification_flow(setup: tuple[TestClient, DPDPKit]) -> None:
+    client, dpdp = setup
+    dpdp.kit.guardians.register_verifier(
+        CallbackVerifier("existing_kyc", lambda req, evidence: evidence.get("token") == "good")
+    )
+    child = {"X-User": "kid1"}
+    start = "/dpdp/guardian/verify/start"
+    assert client.post(start, json={"method": "existing_kyc"}).status_code == 401
+    assert client.post(start, json={"method": "telepathy"}, headers=child).status_code == 422
+    assert client.post(start, json={}, headers=child).status_code == 422
+    assert client.post(start, json={"method": "court_order"}, headers=child).status_code == 422  # no verifier
+
+    started = client.post(start, json={"method": "existing_kyc", "guardian_ref": "g1"}, headers=child)
+    assert started.status_code == 202, started.text
+    ver = started.json()
+    assert ver["status"] == "pending" and ver["method"] == "existing_kyc" and ver["verified_at"] is None
+    assert dpdp.kit.guardians.status("kid1") is GuardianStatus.PENDING
+
+    callback = "/dpdp/guardian/verify/callback"
+    body = {"verification_id": ver["id"], "token": "bad"}
+    assert client.post(callback, json=body, headers={"X-User": "other"}).status_code == 404
+    assert client.post(callback, json={**body, "verification_id": "nope"}, headers=child).status_code == 404
+    failed = client.post(callback, json=body, headers=child)
+    assert failed.status_code == 200 and failed.json()["status"] == "failed"
+    assert client.post(callback, json=body, headers=child).status_code == 409  # already decided
+
+    again = client.post(start, json={"method": "existing_kyc"}, headers=child).json()
+    done = client.post(callback, json={"verification_id": again["id"], "token": "good"}, headers=child)
+    assert done.status_code == 200 and done.json()["status"] == "verified" and done.json()["verified_at"]
+    assert dpdp.kit.guardians.status("kid1") is GuardianStatus.VERIFIED
+
+
+def test_guardian_start_refuses_a_confirmed_adult(setup: tuple[TestClient, DPDPKit]) -> None:
+    client, dpdp = setup
+    dpdp.kit.guardians.register_verifier(CallbackVerifier("existing_kyc", lambda req, evidence: True))
+    dpdp.kit.guardians.assess_age("adult1", actor="gate", age=30)
+    resp = client.post("/dpdp/guardian/verify/start", json={"method": "existing_kyc"}, headers={"X-User": "adult1"})
+    assert resp.status_code == 409
 
 
 def test_activity_middleware_cancels_warned_erasure(setup: tuple[TestClient, DPDPKit], clock: Clock) -> None:

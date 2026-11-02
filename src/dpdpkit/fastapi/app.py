@@ -22,6 +22,7 @@ from dpdpkit import Kit, Registry
 from dpdpkit.config import kit_from_config, load_config, sync_notice
 from dpdpkit.errors import ConfigError, DpdpkitError
 from dpdpkit.events import LEDGER_TAMPERED, WebhookEndpoint
+from dpdpkit.guardians import GuardianVerifier
 from dpdpkit.kit import ContactResolver
 from dpdpkit.ledger import RootSink
 from dpdpkit.models import Role, RootHash
@@ -59,6 +60,10 @@ class DPDPKit:
     ``webhooks`` are delivered through a database outbox (see :mod:`dpdpkit.fastapi.webhooks`); when
     omitted they are read from the ``webhooks:`` list in the config, with secrets from ``secret_env``.
 
+    ``guardian_verifiers`` back ``POST /guardian/verify/*``: each verifier's ``name`` is the ``method`` a client
+    may ask for (``existing_kyc``, ``digilocker_token``, ``partner_token``, ``court_order``). With none registered
+    the start endpoint answers 422.
+
     ``principal_resolver(request)`` returns a stable, non-personal reference for the signed-in user
     (for example the user's primary key), or ``None``. ``admin_guard(request)`` returns a role
     (``viewer``/``handler``/``admin``), ``True`` for admin, or ``None``/``False`` for no access.
@@ -83,6 +88,7 @@ class DPDPKit:
         signing_key: bytes | str | None = None,
         tenant_id: str = "default",
         webhooks: Iterable[WebhookEndpoint] | None = None,
+        guardian_verifiers: Iterable[GuardianVerifier] = (),
         migrate_on_startup: bool = False,
         create_tables: bool = False,
         **kit_kwargs: Any,
@@ -115,6 +121,8 @@ class DPDPKit:
                 raise ConfigError("pass config= (a dpdpkit.yaml) or policy=")
             self.kit = Kit(repository, policy, overlays=overlays, registry=registry, contact=contact, **common)
 
+        for verifier in guardian_verifiers:
+            self.kit.guardians.register_verifier(verifier)
         self.principal_resolver = principal_resolver
         self.admin_guard = admin_guard
         self.router = build_router(self)
