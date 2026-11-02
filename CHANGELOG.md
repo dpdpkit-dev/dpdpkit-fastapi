@@ -4,6 +4,8 @@ All code packages in the dpdpkit release train share one version number.
 
 ## Unreleased
 
+## 0.1.0a2 - 2026-11-02
+
 ### Added
 - `GET /admin/consent/stats` (viewer role): grants, denials and withdrawals per purpose and notice version.
 - Incident endpoints: `GET, POST /admin/incidents`, `GET /admin/incidents/{id}` and
