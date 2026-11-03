@@ -10,7 +10,7 @@ from .http import ConsentRequiredHTTP
 from .repository import SqlAlchemyRepository, make_engine
 from .webhooks import WebhookDelivery, WebhookOutbox
 
-__version__ = "0.1.0a2"
+__version__ = "0.1.0a3"
 
 __all__ = [
     "ActivityMiddleware",

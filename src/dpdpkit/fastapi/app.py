@@ -259,7 +259,7 @@ class DPDPKit:
         app.add_exception_handler(ConsentRequiredHTTP, consent_required_handler)
 
     def mount_admin(self, app: FastAPI, path: str = "/dpdp/admin/ui") -> None:
-        """Serve the prebuilt admin dashboard bundle. Until it ships (v0.4) a placeholder page is served."""
+        """Serve the prebuilt admin dashboard bundle. A source checkout has a placeholder page instead."""
         if not any(getattr(r, "path", None) == path for r in app.routes):
             directory = resources.files("dpdpkit.fastapi") / "admin_static"
             app.mount(path, StaticFiles(directory=str(directory), html=True), name="dpdpkit-admin")

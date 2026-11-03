@@ -4,6 +4,13 @@ All code packages in the dpdpkit release train share one version number.
 
 ## Unreleased
 
+## 0.1.0a3 - 2026-11-03
+
+### Added
+- The wheel now includes the admin dashboard, served at `<prefix>/admin/ui/`. It was a placeholder page
+  before. The version comes from `admin-bundle.version`; a source checkout keeps the placeholder.
+
+
 ## 0.1.0a2 - 2026-11-02
 
 ### Added

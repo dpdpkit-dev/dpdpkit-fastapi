@@ -38,12 +38,16 @@ jobs:
           done
           .venv/bin/pytest -q
           cd examples/fastapi_shop && DPDPKIT_CONFORMANCE=1 DPDPKIT_ASGI_APP=app:app ../../.venv/bin/dpdpkit-conformance -q
+      - name: Add the admin dashboard pinned in admin-bundle.version
+        run: python3 scripts/fetch_admin_bundle.py src/dpdpkit/fastapi/admin_static
       - name: Build
         run: |
           uv build --out-dir dist
       - name: Tag must match package version
         run: |
           ls dist/dpdpkit_fastapi-${{ steps.v.outputs.version }}-*.whl
+      - name: Wheel must contain the admin dashboard
+        run: python3 -m zipfile -l dist/dpdpkit_fastapi-*.whl | grep -q 'admin_static/assets/'
       - name: SBOM
         uses: anchore/sbom-action@v0
         with:
